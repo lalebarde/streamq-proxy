@@ -23,26 +23,6 @@
 #include <sodium.h>
 #endif
 
-//  Test keys from the zmq_curve man page
-//static char client_public [] = "Yne@$w-vo<fVvi]a<NY6T1ed:M$fCG*[IaLV{hID";
-//static char client_secret [] = "D:)Q[IlAW!ahhC2ac:9*A}h:p?([4%wOTJ%JR%cs";
-//static char server_public [] = "rq:rM>}U?@Lns47E1%kR.o@n%FcmmsL/@{H8]yf7";
-//static char server_secret [] = "JTKVSB%%)wK0E.X)V>+}o?pNmC{O&4W4b!Ni{Lh6";
-
-
-// Asynchronous client-to-server (DEALER to ROUTER) - pure libzmq
-//
-// While this example runs in a single process, that is to make
-// it easier to start and stop the example. Each task may have its own
-// context and conceptually acts as a separate process. To have this
-// behaviour, it is necessary to replace the inproc transport of the
-// control socket by a tcp transport.
-
-// This is our client task
-// It connects to the server, and then sends a request once per second
-// It collects responses as they arrive, and it prints them out. We will
-// run several client tasks in parallel, each with a different random ID.
-
 #define CONTENT_SIZE 13
 #define CONTENT_SIZE_MAX 512
 #define REGISTER_SIZE 9
@@ -67,10 +47,6 @@ typedef struct {
     byte as_server;
     byte filler [31];
 } zmtp_greeting_t;
-static zmtp_greeting_t register_greeting
-    = { { 0xFF, 0, 0, 0, 0, 0, 0, 0, 1, 0x7F }, { 3, 0 }, { 'N', 'U', 'L', 'L'} };
-
-
 
 static char client_pub[KEY_SIZE_0], client_sec[KEY_SIZE_0],worker_pub[KEY_SIZE_0], worker_sec[KEY_SIZE_0];
 
@@ -80,9 +56,6 @@ static 	zmq_msg_t worker_identity; static int worker_id_size = 0;
 static void
 client_task (void *ctx)
 {
-//    void *ctx = zmq_ctx_new (); // if we want our own context, we shall use tcp instead of inproc for the control socket
-//    assert (ctx);
-
 	// Client socket
     void *client = zmq_socket (ctx, ZMQ_DEALER);
     assert (client);
@@ -150,59 +123,28 @@ client_task (void *ctx)
 	    	run = false;
 	}
 
-//	// Additional check for unexpected messages
-//	int qt_exceed = 0;
-//	rc = 0;
-//	msleep(100); // makes expect that any unexpected message is delivered
-//	while (rc >= 0) {
-//		rc = zmq_recv (client, content, CONTENT_SIZE_MAX, ZMQ_DONTWAIT); // check for unexpected messages
-//		if (rc >= 0) {
-//			content [CONTENT_SIZE_MAX] = '\0'; // should be useless
-//			if (is_verbose) printf("ERROR: client has received unexpected messages (%d): %s\n", rc, content);
-//			msleep(10);
-//			qt_exceed++;
-//		}
-//	}
-//	if (qt_exceed) {
-//		if (is_verbose) printf("ERROR: client has received %d unexpected messages\n", qt_exceed);
-//	}
-//	else {
-//		if (is_verbose) printf("OK: client has received the expected number of messages\n");
-//	}
-
     rc = zmq_close (client);
     assert (rc == 0);
     rc = zmq_close (control);
     assert (rc == 0);
 	if (is_verbose) printf("Destroy client\n");
-//    rc = zmq_ctx_term (ctx);
-//    assert (rc == 0);
 }
-
-// This is our server task.
-// It uses the multithreaded server model to deal requests out to a pool
-// of workers and route replies back to clients. One worker can handle
-// one request at a time but one client can talk to multiple workers at
-// once.
 
 static void server_worker (void *ctx);
 
 void
 server_proxy (void *ctx)
 {
-//    void *ctx = zmq_ctx_new (); // if we want our own context, we shall use tcp instead of inproc for the control socket
-//    assert (ctx);
-
     // Frontend socket talks to clients over TCP
-    void *frontend = zmq_socket (ctx, ZMQ_STREAM); // use ZMQ_ROUTER to shunt the proxy
+    void *frontend = zmq_socket (ctx, ZMQ_STREAM);
     assert (frontend);
-    int rc = zmq_bind (frontend, "tcp://127.0.0.1:9999"); // Comment to shunt the proxy
+    int rc = zmq_bind (frontend, "tcp://127.0.0.1:9999");
     assert (rc == 0);
 
 	// Backend socket talks to workers over inproc
-    void *backend = zmq_socket (ctx, ZMQ_STREAM); // use ZMQ_ROUTER to shunt the proxy
+    void *backend = zmq_socket (ctx, ZMQ_STREAM);
     assert (backend);
-    rc = zmq_bind (backend, "tcp://127.0.0.1:9998"); // Comment to shunt the proxy - inproc://backend
+    rc = zmq_bind (backend, "tcp://127.0.0.1:9998");
     assert (rc == 0);
 
 	// Control socket receives terminate command from main over inproc
@@ -221,13 +163,8 @@ server_proxy (void *ctx)
 	}
 
 	// variables
-    char content [CONTENT_SIZE_MAX]; //	bigger than what we need to check that
+    char content [CONTENT_SIZE_MAX]; //	bigger than what we need to check we receive the expected size
     int size;
-
-	// Connect backend to frontend via a proxy
-	//zmq_proxy_steerable (frontend, backend, NULL, control);
-
-	///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
     int more;
     size_t moresz = sizeof more;
@@ -238,7 +175,7 @@ server_proxy (void *ctx)
     };
     int qt_poll_items = 2;
     enum {suspend, resume, terminate} control_state = resume;
-    enum {waiting_worker, waiting_client, curve_handcheck, curve_ready} backend_state = waiting_worker; // null_greeting, null_ready, registration,
+    enum {waiting_worker, waiting_client, curve_handcheck, curve_ready} backend_state = waiting_worker;
     enum {no_client, client_is_here} frontend_state = no_client;
     int qtWorkers = 0;
     rc = zmq_msg_init (&client_identity);
@@ -370,70 +307,6 @@ server_proxy (void *ctx)
 				if (rc < 0)
 					break;
 
-//			_switch (backend_state) {
-//			case null_greeting: {
-//				zmtp_greeting_t* g = (zmtp_greeting_t*) content;
-//				assert (!memcmp(g->signature, register_greeting.signature, 10)); // changer le nom register_greeting en zmtp_greeting
-//				//assert (!memcmp(g->mechanism, "NULL", 4)); // not in the first greeting
-//				assert (!more);
-//				// send identity and greeting to worker
-//	            rc = zmq_msg_init (&identity);
-//	            assert (rc == 0);
-//				rc = zmq_msg_copy (&identity, &worker_identity);
-//	            assert (rc == 0);
-//				rc = zmq_msg_send (&identity, backend, ZMQ_SNDMORE);
-//				assert (rc == worker_id_size);
-//	            rc = zmq_msg_close (&identity);
-//	            assert (rc == 0);
-//			    rc = zmq_send (backend, &register_greeting, sizeof (register_greeting), 0);
-//			    assert (rc == sizeof (register_greeting));
-//			    backend_state = null_ready;
-//			    break;
-//			} // case null_greeting
-//			case null_ready: { // from test_stream.cpp
-//			    //  First two bytes are major and minor version numbers.
-//			    assert (content [0] == 3);       //  ZMTP/3.0
-//			    assert (content [1] == 0);
-//
-//			    //  Mechanism is "NULL"
-//			    assert (memcmp (content + 2, "NULL\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 20) == 0);
-//			    assert (memcmp (content + 54, "\4\51\5READY", 8) == 0);
-//			    assert (memcmp (content + 62, "\13Socket-Type\0\0\0\6DEALER", 22) == 0);
-//			    assert (memcmp (content + 84, "\10Identity\0\0\0\0", 13) == 0);
-//
-//			    //  Announce we are ready
-//			    memcpy (content, "\4\51\5READY", 8);
-//			    memcpy (content + 8, "\13Socket-Type\0\0\0\6ROUTER", 22);
-//			    memcpy (content + 30, "\10Identity\0\0\0\0", 13);
-//
-//			    //  Send Ready command
-//	            rc = zmq_msg_init (&identity);
-//	            assert (rc == 0);
-//				rc = zmq_msg_copy (&identity, &worker_identity);
-//	            assert (rc == 0);
-//			    rc = zmq_msg_send (&identity, backend, ZMQ_SNDMORE);
-//				assert (rc == worker_id_size);
-//	            rc = zmq_msg_close (&identity);
-//	            assert (rc == 0);
-//			    rc = zmq_send (backend, content, 43, 0);
-//			    assert (rc == 43);
-//			    backend_state = registration;
-//			 	break;
-//			} // case null_ready
-//			case registration: {
-//				// register the workers
-//			    assert (content [0] == 0);       		//  Flags = 0
-//			    assert (content [1] == REGISTER_SIZE);	//  Size = REGISTER_SIZE
-//			 	if (memcmp(content + 2, REGISTER_MSG, REGISTER_SIZE) == 0) {
-////					if (is_verbose) printf("proxy: worker %s has registered\n", worker_identity);
-////					qtWorkers++;
-//				    backend_state = curve_handcheck;
-//				}
-//				else { // unexpected message
-//					assert(false);
-//				}
-//				break;
-//			} // case registration
 				if (backend_state == curve_handcheck) {
 					zmtp_greeting_t* g = (zmtp_greeting_t*) content;
 					if (!memcmp(g->mechanism, "CURVE", 5)) { // CURVE
@@ -445,7 +318,7 @@ server_proxy (void *ctx)
 					}
 	//				else
 	//					assert (false); // unexpected mechanism
-				} // no break is desired
+				}
 				if (backend_state == curve_handcheck || backend_state ==  curve_ready) {
 						// send identity and greeting to client
 						rc = zmq_msg_init (&identity);
@@ -474,14 +347,9 @@ server_proxy (void *ctx)
 							assert (rc == size);
 						}
 					}
-	//				break;
-	//			} // case curve_handcheck
-	//			} // switch (backend_state)
 			} // if (frontend_state != no_client)
         } // if (control_state == resume && items [BACKEND].revents & ZMQ_POLLIN)
     } // while (control_state != terminate)
-
-	///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 	msleep(100);
 
@@ -499,33 +367,15 @@ server_proxy (void *ctx)
     assert (rc == 0);
     rc = zmq_close (control);
     assert (rc == 0);
-//    rc = zmq_ctx_term (ctx);
-//    assert (rc == 0);
 }
-
-// Each worker task works on one request at a time and sends a random number
-// of replies back, with random delays between replies:
-// The comments in the first column, if suppressed, makes it a poller version
 
 static void
 server_worker (void *ctx)
 {
 
-	void *worker = zmq_socket (ctx, ZMQ_DEALER); // Use ZMQ_ROUTER to shunt the proxy
+	void *worker = zmq_socket (ctx, ZMQ_DEALER);
     assert (worker);
-//    int rc = zmq_connect (worker, "tcp://127.0.0.1:9998"); // Comment to shunt the proxy - inproc://backend
-////    rc = zmq_bind (worker, "tcp://127.0.0.1:9999"); // unComment to shunt the proxy
-//    assert (rc == 0);
 	if (is_verbose) printf("Create worker\n");
-
-//    // register as NULL
-//    const char register_cmd [] = REGISTER_MSG; // 9 = REGISTER_SIZE
-//	rc = zmq_send (worker, register_cmd, REGISTER_SIZE, 0); // Comment to shunt the proxy
-//	assert (rc == REGISTER_SIZE); // Comment to shunt the proxy
-
-//	// switch to CURVE
-//    rc = zmq_disconnect (worker, "tcp://127.0.0.1:9998");
-//    assert (rc == 0);
     int as_server = 1;
     int rc = zmq_setsockopt (worker, ZMQ_CURVE_SERVER, &as_server, sizeof (int));
     assert (rc == 0);
@@ -533,8 +383,7 @@ server_worker (void *ctx)
     assert (rc == 0);
 //    rc = zmq_setsockopt (worker, ZMQ_IDENTITY, "worker___", ID_SIZE); // includes '\0' as an helper for printf
 //    assert (rc == 0);
-    rc = zmq_connect (worker, "tcp://127.0.0.1:9998"); // Comment to shunt the proxy - inproc://backend
-//    rc = zmq_bind (worker, "tcp://127.0.0.1:9999"); // unComment to shunt the proxy
+    rc = zmq_connect (worker, "tcp://127.0.0.1:9998");
     assert (rc == 0);
 
     // Control socket receives terminate command from main over inproc
@@ -549,42 +398,32 @@ server_worker (void *ctx)
     char content [CONTENT_SIZE_MAX]; //	bigger than what we need to check that
 	char identity [ID_SIZE_MAX];
 
-//	zmq_pollitem_t items [] = { { worker, 0, ZMQ_POLLIN, 0 }, { control, 0, ZMQ_POLLIN, 0 } }; // POLLING
 	bool run = true;
 	while (run) {
-//		zmq_poll (items, 2, 10); // POLLING
-//		if (items [1].revents & ZMQ_POLLIN) { // POLLING
-			rc = zmq_recv (control, content, CONTENT_SIZE_MAX, ZMQ_DONTWAIT); // usually, rc == -1 (no message)
-			if (rc > 0) {
-				if (is_verbose) printf("worker %s receives command = %s\n", worker_identity, content);
-				if (memcmp (content, "TERMINATE", 10) == 0)
-					run = false;
-			}
-//		} // POLLING
+		rc = zmq_recv (control, content, CONTENT_SIZE_MAX, ZMQ_DONTWAIT); // usually, rc == -1 (no message)
+		if (rc > 0) {
+			if (is_verbose) printf("worker %s receives command = %s\n", worker_identity, content);
+			if (memcmp (content, "TERMINATE", 10) == 0)
+				run = false;
+		}
 
-//		if (items [0].revents & ZMQ_POLLIN) { // POLLING
-			// The DEALER socket gives us the reply envelope and message
-			int id_size = zmq_recv (worker, identity, ID_SIZE_MAX, ZMQ_DONTWAIT); // we are in Ping-Pong, so synchronous, BUT we cannot wait, otherwise control cannot be trigged // if we don't poll, we have to use ZMQ_DONTWAIT, if we poll, we can block-receive with 0
-			if (id_size > 0) { // rc == ID_SIZE
-				rc = zmq_recv (worker, content, CONTENT_SIZE_MAX, 0);
+		// The DEALER socket gives us the reply envelope and message
+		int id_size = zmq_recv (worker, identity, ID_SIZE_MAX, ZMQ_DONTWAIT); // we are in Ping-Pong, so synchronous, BUT we cannot wait, otherwise control cannot be trigged // if we don't poll, we have to use ZMQ_DONTWAIT, if we poll, we can block-receive with 0
+		if (id_size > 0) {
+			rc = zmq_recv (worker, content, CONTENT_SIZE_MAX, 0);
+			assert (rc == CONTENT_SIZE);
+			if (is_verbose) printf("worker %s has received from client content = %s\n", worker_identity, content);
+
+			// Send 0..4 replies back
+			int reply, replies = 1; //rand() % 5;    ONLY one reply to be conform to the new client definition
+			for (reply = 0; reply < replies; reply++) {
+				//  Send message from worker to client
+				rc = zmq_send (worker, identity, id_size, ZMQ_SNDMORE);
+				assert (rc == id_size);
+				rc = zmq_send (worker, content, CONTENT_SIZE, 0);
 				assert (rc == CONTENT_SIZE);
-				if (is_verbose) printf("worker %s has received from client content = %s\n", worker_identity, content);
-
-				// Send 0..4 replies back
-				int reply, replies = 1; //rand() % 5;    ONLY one reply to be conform to the new client definition
-				for (reply = 0; reply < replies; reply++) {
-					//  Send message from worker to client
-					rc = zmq_send (worker, identity, id_size, ZMQ_SNDMORE);
-					assert (rc == id_size);
-					rc = zmq_send (worker, content, CONTENT_SIZE, 0);
-					assert (rc == CONTENT_SIZE);
-				}
 			}
-			else {
-				// this test is easily perturbed by costly instructions, due to its timing (cf centitick) - we put a kind of nop here to keep track of it
-				if (is_verbose) run = run && true; // printf("WARNING : server_worker receives %d bytes instead of %d (ID_SIZE)\n", rc, ID_SIZE);
-			}
-//		} // POLLING
+		}
 	}
     rc = zmq_close (worker);
     assert (rc == 0);
@@ -593,7 +432,7 @@ server_worker (void *ctx)
 	if (is_verbose) printf("Destroy worker %s\n", worker_identity);
 }
 
-// The main thread simply starts several clients and a server, and then
+// The main thread simply starts one client and the proxy, and then
 // waits for the server to finish.
 
 int main (void)
@@ -619,10 +458,6 @@ int main (void)
 	// start client thread with id
 	threads[0] = zmq_threadstart  (&client_task, ctx);
 	threads[1] = zmq_threadstart  (&server_proxy, ctx);
-//	msleep (20000); // Run for 500 ms then quit
-//
-//	rc = zmq_send (control, "TERMINATE", 10, 0);
-//	assert (rc == 10);
 
 	zmq_threadclose (threads[0]); // after that, all clients have finished
 
