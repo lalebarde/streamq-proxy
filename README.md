@@ -1,10 +1,12 @@
 # StreamQ-Proxy
 
-## Warning
+## Warnings
 
-As of December 2013, this is an experimental project that does not implement 
+1. As of December 2013, this is an experimental project that does not implement 
 the [requirements](SRD.md) below, but only provides a minimal feasability test, which
 still does not work, for discussions, advices, contributions (cf State below).
+
+2. For conveniance, I have copied a few include files from libzmq. The rational is to be able to work with this test as a standalone project, or integrated in libzmq/tests. These files are: include/zmq.h, include/zmq_utils.h, src/platform.hpp, and tests/testutil.hpp
 
 ## Welcome
 
