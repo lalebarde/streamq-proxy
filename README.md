@@ -56,7 +56,17 @@ TODO: makes this first feasability program work. Advices and contributions are w
 
 ## Building and installation
 
-TODO: See the INSTALL file included with the distribution.
+We have a simple bash builder for our first test program test_curve_proxying.
+
+```
+git clone https://github.com/lalebarde/streamq-proxy
+cd streamq-proxy
+./build-test_curve_proxying
+```
+Run with:
+```
+tests/test_curve_proxying
+```
 
 ## Resources
 

@@ -1,0 +1,3 @@
+cd tests
+g++ -DHAVE_LIBSODIUM  -I"../include" -I"../src" -l"sodium" -O0 -g3 -Wall -c -fmessage-length=0 test_curve_proxying.cpp -o test_curve_proxying
+
