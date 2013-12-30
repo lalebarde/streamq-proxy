@@ -80,7 +80,7 @@ client_task (void *ctx)
     assert (rc == 0);
 
     char content [CONTENT_SIZE_MAX];
-    content [CONTENT_SIZE_MAX] = '\0';
+    content [CONTENT_SIZE_MAX - 1] = '\0';
     zmq_pollitem_t items [] = { { client, 0, ZMQ_POLLIN, 0 }, { control, 0, ZMQ_POLLIN, 0 } };
     int request_nbr = 0;
     bool run = true;
