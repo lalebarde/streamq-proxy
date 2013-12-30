@@ -31,6 +31,7 @@
 #define ID_SIZE_MAX 32
 #define QT_WORKERS    1 // WARNING: this code has been simplified and can accept only one worker
 #define QT_CLIENTS    1 // WARNING: this code has been simplified and can accept only one client
+#define QT_REQUESTS 100 // 100
 #define is_verbose 1
 #define BACKEND 0
 #define CONTROL 1
@@ -119,7 +120,7 @@ client_task (void *ctx)
                 }
             }
         }
-        if (request_nbr >= 100)
+        if (request_nbr >= QT_REQUESTS)
             run = false;
     }
 
@@ -253,7 +254,7 @@ server_proxy (void *ctx)
                     assert (rc == 0);
                     rc = zmq_msg_copy (&identity, &worker_identity);
                     assert (rc == 0);
-                    rc = zmq_msg_send (&worker_identity, backend, ZMQ_SNDMORE);
+                    rc = zmq_msg_send (&identity, backend, ZMQ_SNDMORE);
                     assert (rc == (int) worker_id_size);
                     rc = zmq_msg_close (&identity);
                     assert (rc == 0);
@@ -289,8 +290,10 @@ server_proxy (void *ctx)
                 rc = zmq_msg_close (&identity);
                 assert (rc == 0);
 
-                qtWorkers++; // unconditionally so that the exchange of greetings can occur: we have to ear for the client now
-                backend_state = waiting_client;
+                if (backend_state == waiting_worker) {
+                    qtWorkers++; // unconditionally so that the exchange of greetings can occur: we have to ear for the client now
+                    backend_state = waiting_client;
+                }
             }
 
             if (frontend_state == client_is_here) {
@@ -407,19 +410,20 @@ server_worker (void *ctx)
                 run = false;
         }
 
-        // The DEALER socket gives us the reply envelope and message
-        int id_size = zmq_recv (worker, identity, ID_SIZE_MAX, ZMQ_DONTWAIT); // we are in Ping-Pong, so synchronous, BUT we cannot wait, otherwise control cannot be trigged // if we don't poll, we have to use ZMQ_DONTWAIT, if we poll, we can block-receive with 0
-        if (id_size > 0) {
-            rc = zmq_recv (worker, content, CONTENT_SIZE_MAX, 0);
-            assert (rc == CONTENT_SIZE);
+        int rcvmore;
+        size_t sz = sizeof (rcvmore);
+        int size = zmq_recv (worker, content, CONTENT_SIZE_MAX, ZMQ_DONTWAIT); // 0);
+        if (size > 0) {
+            assert (size == CONTENT_SIZE);
             if (is_verbose) printf("worker %s has received from client content = %s\n", worker_identity._, content);
+            rc = zmq_getsockopt (worker, ZMQ_RCVMORE, &rcvmore, &sz);
+            assert (rc == 0);
+            assert (!rcvmore);
 
             // Send 0..4 replies back
             int reply, replies = 1; //rand() % 5;    ONLY one reply to be conform to the new client definition
             for (reply = 0; reply < replies; reply++) {
                 //  Send message from worker to client
-                rc = zmq_send (worker, identity, id_size, ZMQ_SNDMORE);
-                assert (rc == id_size);
                 rc = zmq_send (worker, content, CONTENT_SIZE, 0);
                 assert (rc == CONTENT_SIZE);
             }
@@ -469,7 +473,6 @@ int main (void)
 
     rc = zmq_close (control);
     assert (rc == 0);
-    //msleep (1000); // not sure it is usefull
 
 
     msleep (1000); // not sure it is usefull

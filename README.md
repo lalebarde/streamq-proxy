@@ -2,9 +2,9 @@
 
 ## Warnings
 
-1. As of December 2013, this is an experimental project that does not implement 
+1. As of December 2013, this is an experimental project that does not implement yet
 the [requirements](SRD.md) below, but only provides a minimal feasability test, which
-still does not work, for discussions, advices, contributions (cf State below).
+demonstrates the feasability of CURVE proxying (cf § *State* below).
 
 2. For conveniance, I have copied a few include files from libzmq. The rational is to be able to work with this test as a standalone project, or integrated in libzmq/tests. These files are: include/zmq.h, include/zmq_utils.h, src/platform.hpp, and tests/testutil.hpp
 
@@ -46,15 +46,15 @@ also the client and the backend stays on standby until the client is identified.
 the proxy forwards all the messages from one to the other. There is a little
 state machine for the frontend and for the backend in the proxy.
 
-It starts well, both client and worker are identified in the proxy, then
-both backend and frontend forward the identity and signature of one peer to
-the other.
+This first feasability program works.
 
-*The problem is that just after the frontend has sent them, it receive back
-from the client its identity (as expected), and a 1 byte message (content =
-3) instead of the greeting.*
+TODO:
 
-TODO: makes this first feasability program work. Advices and contributions are welcome.
+1. Test multi-part messages.
+
+2. Test asynchronicity (send several messages before waiting for responses).
+
+3. Extend to many clients & workers.
 
 ## Building and installation
 
