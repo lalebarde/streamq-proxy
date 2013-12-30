@@ -85,13 +85,20 @@ client_task (void *ctx)
     zmq_pollitem_t items [] = { { client, 0, ZMQ_POLLIN, 0 }, { control, 0, ZMQ_POLLIN, 0 } };
     int request_nbr = 0;
     bool run = true;
-    int qtMsgPerRound = 1;
+    int qtMsgPerRound = 2;
     while (run) {
         // send
+     bool isMultipart;
         for (int i = 0; i < qtMsgPerRound; i++) {
+         isMultipart = (i == 0);
             sprintf(content, "request #%03d", ++request_nbr); // CONTENT_SIZE
-            rc = zmq_send (client, content, CONTENT_SIZE, 0);
+            rc = zmq_send (client, content, CONTENT_SIZE, isMultipart ? ZMQ_SNDMORE: 0); // first message is a multipart one
             assert (rc == CONTENT_SIZE);
+            if (isMultipart) {
+                rc = zmq_send (client, "--- multipart ---", 18, 0); // first message is a multipart one
+                assert (rc == 18);
+
+            }
         }
 
         // receive
@@ -108,8 +115,18 @@ client_task (void *ctx)
                 assert (memcmp (content, "request #", 9) == 0);
                 rc = zmq_getsockopt (client, ZMQ_RCVMORE, &rcvmore, &sz);
                 assert (rc == 0);
-                assert (!rcvmore);
+                isMultipart = (qt_received == 0);
+                assert (!rcvmore && !isMultipart || rcvmore && isMultipart);
                 qt_received++;
+                if (isMultipart) {
+                    rc = zmq_recv (client, content, CONTENT_SIZE_MAX, 0);
+                    assert (rc == 18);
+                    if (is_verbose) printf("client receive content = %s\n", content);
+                    assert (memcmp (content, "--- multipart ---", 18) == 0);
+                    rc = zmq_getsockopt (client, ZMQ_RCVMORE, &rcvmore, &sz);
+                    assert (rc == 0);
+                    assert (!rcvmore);
+                }
             }
             if (items [1].revents & ZMQ_POLLIN) {
                 rc = zmq_recv (control, content, CONTENT_SIZE_MAX, 0);
@@ -332,7 +349,7 @@ server_proxy (void *ctx)
                         assert (rc == (int) client_id_size);
                         rc = zmq_msg_close (&identity);
                         assert (rc == 0);
-                        rc = zmq_send (frontend, content, size, 0);
+                        rc = zmq_send (frontend, content, size, more? ZMQ_SNDMORE: 0);
                         assert (rc == size);
                         while (more) {
                             // receive content
@@ -414,18 +431,19 @@ server_worker (void *ctx)
         size_t sz = sizeof (rcvmore);
         int size = zmq_recv (worker, content, CONTENT_SIZE_MAX, ZMQ_DONTWAIT); // 0);
         if (size > 0) {
-            assert (size == CONTENT_SIZE);
+            if (memcmp(content, "request #", 9) == 0) assert (size == CONTENT_SIZE);
+            else assert (size == 18);
             if (is_verbose) printf("worker %s has received from client content = %s\n", worker_identity._, content);
             rc = zmq_getsockopt (worker, ZMQ_RCVMORE, &rcvmore, &sz);
             assert (rc == 0);
-            assert (!rcvmore);
+            //assert (!rcvmore);
 
             // Send 0..4 replies back
             int reply, replies = 1; //rand() % 5;    ONLY one reply to be conform to the new client definition
             for (reply = 0; reply < replies; reply++) {
                 //  Send message from worker to client
-                rc = zmq_send (worker, content, CONTENT_SIZE, 0);
-                assert (rc == CONTENT_SIZE);
+                rc = zmq_send (worker, content, size, rcvmore? ZMQ_SNDMORE: 0);
+                assert (rc == size);
             }
         }
     }

@@ -46,15 +46,9 @@ also the client and the backend stays on standby until the client is identified.
 the proxy forwards all the messages from one to the other. There is a little
 state machine for the frontend and for the backend in the proxy.
 
-This first feasability program works.
+This first feasability program works, including with multipart messages and asynchronous messages.
 
-TODO:
-
-1. Test multi-part messages.
-
-2. Test asynchronicity (send several messages before waiting for responses).
-
-3. Extend to many clients & workers.
+TODO: Extend to many clients & workers.
 
 ## Building and installation
 
