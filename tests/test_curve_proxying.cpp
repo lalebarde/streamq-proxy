@@ -49,10 +49,22 @@ typedef struct {
     byte filler [31];
 } zmtp_greeting_t;
 
+typedef struct {
+    byte signature [10];
+    byte version_major [1];
+} zmtp_greeting_1_t;
+
+typedef struct {
+    byte version_minor [1];
+    byte mechanism [20];    //  "NULL"
+    byte as_server;
+    byte filler [31];
+} zmtp_greeting_2_t;
+
 static char client_pub[KEY_SIZE_0], client_sec[KEY_SIZE_0],worker_pub[KEY_SIZE_0], worker_sec[KEY_SIZE_0];
 
-static     zmq_msg_t client_identity; static size_t client_id_size = 0;
-static     zmq_msg_t worker_identity; static size_t worker_id_size = 0;
+static     char client_identity[ID_SIZE_MAX]; static size_t client_id_size = 0;
+static     char worker_identity[ID_SIZE_MAX]; static size_t worker_id_size = 0;
 
 static void
 client_task (void *ctx)
@@ -193,13 +205,9 @@ server_proxy (void *ctx)
     };
     int qt_poll_items = 2;
     enum {suspend, resume, terminate} control_state = resume;
-    enum {waiting_worker, waiting_client, curve_handcheck, curve_ready} backend_state = waiting_worker;
+    enum {waiting_worker, waiting_client, check_mechanism, curve_handcheck, curve_ready} backend_state = waiting_worker;
     enum {no_client, client_is_here} frontend_state = no_client;
     int qtWorkers = 0;
-    rc = zmq_msg_init (&client_identity);
-    assert (rc == 0);
-    rc = zmq_msg_init (&worker_identity);
-    assert (rc == 0);
 
     while (control_state != terminate) {
         //  Wait while there are either requests or replies to process.
@@ -236,23 +244,20 @@ server_proxy (void *ctx)
             frontend_state = client_is_here;
 
             //  First frame is identity
-            zmq_msg_t identity;
-            rc = zmq_msg_init (&identity);
-            assert (rc == 0);
-            rc = zmq_msg_recv (&identity, frontend, 0);
-            assert (rc > 0);
-            assert (zmq_msg_more (&identity)); // we expect at least one message after the identifier
+            char identity[ID_SIZE_MAX];
+            size = zmq_recv (frontend, identity, ID_SIZE_MAX, 0);
+            assert (size > 0);
+            rc = zmq_getsockopt (frontend, ZMQ_RCVMORE, &more, &moresz);
+            assert (rc >= 0);
+            assert (more != 0); // we expect at least one message after the identifier
             if (!client_id_size) { // first time store the identity
-                client_id_size = zmq_msg_size (&identity);
-                rc = zmq_msg_move (&client_identity, &identity);
-                assert (rc == 0);
+                client_id_size = size;
+                memcpy(client_identity, identity, size);
             }
             else { // other times, check it is the same
-                assert (client_id_size == zmq_msg_size (&identity));
-                assert (!memcmp(zmq_msg_data (&client_identity), zmq_msg_data (&identity), client_id_size));
+                assert (client_id_size == (size_t) size);
+                assert (!memcmp(client_identity, identity, client_id_size));
             }
-            rc = zmq_msg_close (&identity);
-            assert (rc == 0);
 
             while (true) {
                 // receive content
@@ -267,14 +272,8 @@ server_proxy (void *ctx)
 
                 // send (request) to worker
                 if (hasToSendIdentityToWorker) {
-                    rc = zmq_msg_init (&identity);
-                    assert (rc == 0);
-                    rc = zmq_msg_copy (&identity, &worker_identity);
-                    assert (rc == 0);
-                    rc = zmq_msg_send (&identity, backend, ZMQ_SNDMORE);
+                    rc = zmq_send (backend, worker_identity, worker_id_size, ZMQ_SNDMORE);
                     assert (rc == (int) worker_id_size);
-                    rc = zmq_msg_close (&identity);
-                    assert (rc == 0);
                     hasToSendIdentityToWorker = false;
                 }
                 rc = zmq_send (backend, content, size, more? ZMQ_SNDMORE: 0);
@@ -286,36 +285,34 @@ server_proxy (void *ctx)
         //  Process a reply
         if (control_state == resume && items [BACKEND].revents & ZMQ_POLLIN) {
 
-            zmq_msg_t identity;
+            char identity[ID_SIZE_MAX];
 
             if (backend_state != waiting_client) {
                 //  First frame is identity
-                rc = zmq_msg_init (&identity);
-                assert (rc == 0);
-                rc = zmq_msg_recv (&identity, backend, 0);
-                assert (rc > 0);
-                assert (zmq_msg_more (&identity)); // we expect at least one message after the identifier
+                size = zmq_recv (backend, identity, ID_SIZE_MAX, 0);
+                assert (size > 0);
+                rc = zmq_getsockopt (backend, ZMQ_RCVMORE, &more, &moresz);
+                assert (rc >= 0);
+                assert (more != 0); // we expect at least one message after the identifier
                 if (!worker_id_size) { // first time store the identity
-                    worker_id_size = zmq_msg_size (&identity);
-                    rc = zmq_msg_move (&worker_identity, &identity);
-                    assert (rc == 0);
+                    worker_id_size = size;
+                    memcpy(worker_identity, identity, size);
                 }
                 else { // other times, check it is the same
-                    assert (worker_id_size == zmq_msg_size (&identity));
-                    assert (!memcmp(zmq_msg_data (&worker_identity), zmq_msg_data (&identity), worker_id_size));
+                    assert (worker_id_size == (size_t) size);
+                    assert (!memcmp(worker_identity, identity, worker_id_size));
                 }
-                rc = zmq_msg_close (&identity);
-                assert (rc == 0);
 
                 if (backend_state == waiting_worker) {
                     qtWorkers++; // unconditionally so that the exchange of greetings can occur: we have to ear for the client now
                     backend_state = waiting_client;
+                    if (is_verbose) printf("proxy: worker %s has registered\n", worker_identity);
                 }
             }
 
             if (frontend_state == client_is_here) {
 
-                backend_state = curve_handcheck;
+                if (backend_state == waiting_client) backend_state = check_mechanism;
 
                 // Second frame depends on the backend_state
                 size = zmq_recv (backend, content, CONTENT_SIZE_MAX, 0);
@@ -327,28 +324,28 @@ server_proxy (void *ctx)
                 if (rc < 0)
                     break;
 
-                if (backend_state == curve_handcheck) {
-                    zmtp_greeting_t* g = (zmtp_greeting_t*) content;
-                    if (!memcmp(g->mechanism, "CURVE", 5)) { // CURVE
-                        // check the end of the handcheck - this is wrong for the moment (taken from NULL), but is not a showstopper
-                        if (content [0] == 0 && content [1] == 5 && !memcmp(content + 2, "READY", 5) && !more) {
-                            if (is_verbose) printf("proxy: worker %s has registered\n", worker_identity._);
-                            backend_state = curve_ready;
+                if (backend_state == check_mechanism && !more) {
+                    if (size >= sizeof(zmtp_greeting_t)) { // size == sizeof(zmtp_greeting_t)
+                        zmtp_greeting_t* g = (zmtp_greeting_t*) content;
+                        if (!memcmp(g->mechanism, "CURVE", 5)) { // CURVE
+                            backend_state = curve_handcheck;
                         }
                     }
-//                    else
-//                        assert (false); // unexpected mechanism
+                    if (size >= sizeof(zmtp_greeting_2_t)) { // size == sizeof(zmtp_greeting_2_t)
+                        zmtp_greeting_2_t* g = (zmtp_greeting_2_t*) content;
+                        if (!memcmp(g->mechanism, "CURVE", 5)) { // CURVE
+                            backend_state = curve_handcheck;
+                        }
+                    }
                 }
-                if (backend_state == curve_handcheck || backend_state ==  curve_ready) {
+                if (backend_state == curve_handcheck && !more && size >= 5 && !memcmp(content + 3, "READY", 5)) { // From the RFC, SHOULD be content + 1
+                    if (is_verbose) printf("proxy: worker %s is ready\n", worker_identity);
+                    backend_state = curve_ready;
+                }
+                if (backend_state == check_mechanism || backend_state == curve_handcheck || backend_state ==  curve_ready) {
                         // send identity and greeting to client
-                        rc = zmq_msg_init (&identity);
-                        assert (rc == 0);
-                        rc = zmq_msg_copy (&identity, &client_identity);
-                        assert (rc == 0);
-                        rc = zmq_msg_send (&identity, frontend, ZMQ_SNDMORE);
+                        rc = zmq_send (frontend, client_identity, client_id_size, ZMQ_SNDMORE);
                         assert (rc == (int) client_id_size);
-                        rc = zmq_msg_close (&identity);
-                        assert (rc == 0);
                         rc = zmq_send (frontend, content, size, more? ZMQ_SNDMORE: 0);
                         assert (rc == size);
                         while (more) {
@@ -375,11 +372,6 @@ server_proxy (void *ctx)
 
     for (thread_nbr = 0; thread_nbr < QT_WORKERS; thread_nbr++)
         zmq_threadclose (threads[thread_nbr]);
-
-    rc = zmq_msg_close (&client_identity);
-    assert (rc == 0);
-    rc = zmq_msg_close (&worker_identity);
-    assert (rc == 0);
 
     rc = zmq_close (frontend);
     assert (rc == 0);
@@ -416,13 +408,12 @@ server_worker (void *ctx)
 
     // variables
     char content [CONTENT_SIZE_MAX]; //    bigger than what we need to check that
-    char identity [ID_SIZE_MAX];
 
     bool run = true;
     while (run) {
         rc = zmq_recv (control, content, CONTENT_SIZE_MAX, ZMQ_DONTWAIT); // usually, rc == -1 (no message)
         if (rc > 0) {
-            if (is_verbose) printf("worker %s receives command = %s\n", worker_identity._, content);
+            if (is_verbose) printf("worker %s receives command = %s\n", worker_identity, content);
             if (memcmp (content, "TERMINATE", 10) == 0)
                 run = false;
         }
@@ -433,7 +424,7 @@ server_worker (void *ctx)
         if (size > 0) {
             if (memcmp(content, "request #", 9) == 0) assert (size == CONTENT_SIZE);
             else assert (size == 18);
-            if (is_verbose) printf("worker %s has received from client content = %s\n", worker_identity._, content);
+            if (is_verbose) printf("worker %s has received from client content = %s\n", worker_identity, content);
             rc = zmq_getsockopt (worker, ZMQ_RCVMORE, &rcvmore, &sz);
             assert (rc == 0);
             //assert (!rcvmore);
@@ -451,7 +442,7 @@ server_worker (void *ctx)
     assert (rc == 0);
     rc = zmq_close (control);
     assert (rc == 0);
-    if (is_verbose) printf("Destroy worker %s\n", worker_identity._);
+    if (is_verbose) printf("Destroy worker %s\n", worker_identity);
 }
 
 // The main thread simply starts one client and the proxy, and then
