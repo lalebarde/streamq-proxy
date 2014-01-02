@@ -33,6 +33,7 @@
 #define QT_CLIENTS    1 // WARNING: this code has been simplified and can accept only one client
 #define QT_REQUESTS 100 // 100
 #define is_verbose 1
+#define is_hc_dump 1
 #define BACKEND 0
 #define CONTROL 1
 #define FRONTEND 2
@@ -65,6 +66,13 @@ static char client_pub[KEY_SIZE_0], client_sec[KEY_SIZE_0],worker_pub[KEY_SIZE_0
 
 static     char client_identity[ID_SIZE_MAX]; static size_t client_id_size = 0;
 static     char worker_identity[ID_SIZE_MAX]; static size_t worker_id_size = 0;
+
+static char
+printc(char c)
+{
+    if (c < 32 || c == 127) return 254;
+    return c;
+}
 
 static void
 client_task (void *ctx)
@@ -265,6 +273,9 @@ server_proxy (void *ctx)
                 if (size < 0)
                     break;
 
+                // dump
+                if (is_hc_dump) {printf("C (%d): ", size); for (int i = 0; i < size; i++) printf("%u '%c'  ", (uint8_t) content[i], printc(content[i])); printf("\n");}
+
                 // is there more message ?
                 rc = zmq_getsockopt (frontend, ZMQ_RCVMORE, &more, &moresz);
                 if (rc < 0)
@@ -324,6 +335,9 @@ server_proxy (void *ctx)
                 if (rc < 0)
                     break;
 
+                // dump
+                if (is_hc_dump) {printf("\t\tS (%d): ", size); for (int i = 0; i < size; i++) printf("%u '%c'  ", (uint8_t) content[i], printc(content[i])); printf("\n");}
+
                 if (backend_state == check_mechanism && !more) {
                     if (size >= sizeof(zmtp_greeting_t)) { // size == sizeof(zmtp_greeting_t)
                         zmtp_greeting_t* g = (zmtp_greeting_t*) content;
@@ -353,6 +367,9 @@ server_proxy (void *ctx)
                             size = zmq_recv (backend, content, CONTENT_SIZE_MAX, 0);
                             if (size < 0)
                                 break;
+
+                            // dump
+                            if (is_hc_dump) {printf("\t\tS (%d): ", size); for (int i = 0; i < size; i++) printf("%u '%c'  ", (uint8_t) content[i], printc(content[i])); printf("\n");}
 
                             // is there more message ?
                             rc = zmq_getsockopt (backend, ZMQ_RCVMORE, &more, &moresz);
